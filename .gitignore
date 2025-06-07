@@ -1,0 +1,28 @@
+# Environment variables (contains API keys)
+.env
+.ENV1
+*.env
+.env.*
+
+# Python
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+travel_env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
