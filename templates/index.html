@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TripCraft - AI-Powered Travel Planning</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; padding: 20px;
+        }
+        .navbar {
+            background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px);
+            padding: 1rem 2rem; border-radius: 20px; margin-bottom: 30px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        .logo { display: flex; align-items: center; gap: 12px; font-size: 24px; font-weight: 700; }
+        .logo-icon {
+            width: 40px; height: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px; display: flex; align-items: center; justify-content: center;
+            font-size: 20px; color: white; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+        .logo-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .ai-badge {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ffa726 100%); color: white;
+            padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: 600;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3); animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+        .container {
+            max-width: 1400px; margin: 0 auto; background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px); border-radius: 24px; padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .hero-section { text-align: center; margin-bottom: 50px; }
+        .hero-title {
+            font-size: clamp(2rem, 4vw, 3rem); font-weight: 700; margin-bottom: 15px;
+            background: linear-gradient(135deg, #1a1a1a 0%, #4a4a4a 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .hero-subtitle { font-size: 1.2rem; color: #6b7280; margin-bottom: 25px; }
+        .features-preview { display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; }
+        .feature-pill {
+            background: rgba(102, 126, 234, 0.1); color: #667eea; padding: 8px 16px;
+            border-radius: 20px; font-size: 14px; font-weight: 500; border: 1px solid rgba(102, 126, 234, 0.2);
+        }
+        .feature-pill.ai-feature {
+            background: linear-gradient(135deg, rgba(255, 107, 107, 0.1) 0%, rgba(255, 167, 38, 0.1) 100%);
+            color: #ff6b6b; border: 1px solid rgba(255, 107, 107, 0.2);
+        }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-bottom: 30px; }
+        .form-section {
+            background: #f8fafc; padding: 35px; border-radius: 20px;
+            border: 1px solid #e5e7eb; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        }
+        .section-title {
+            font-size: 1.3rem; font-weight: 600; color: #1f2937; margin-bottom: 25px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .form-group { margin-bottom: 25px; }
+        .form-label {
+            display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;
+        }
+        .form-input, .form-select {
+            width: 100%; padding: 14px 18px; border: 2px solid #e5e7eb; border-radius: 12px;
+            font-size: 16px; background: white; transition: all 0.3s ease; font-family: inherit;
+        }
+        .form-input:focus, .form-select:focus {
+            outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            transform: translateY(-1px);
+        }
+        .submit-btn, .debug-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none;
+            padding: 16px 32px; border-radius: 12px; font-size: 16px; font-weight: 600;
+            cursor: pointer; width: 100%; transition: all 0.3s ease;
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3); margin-bottom: 10px;
+        }
+        .debug-btn {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            padding: 8px 16px; font-size: 14px;
+        }
+        .submit-btn:hover, .debug-btn:hover {
+            transform: translateY(-2px); box-shadow: 0 8px 30px rgba(102, 126, 234, 0.4);
+        }
+        .loading { text-align: center; padding: 60px 20px; display: none; }
+        .spinner {
+            border: 4px solid #f1f5f9; border-top: 4px solid #667eea; border-radius: 50%;
+            width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 0 auto 25px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .loading p { color: #667eea; font-weight: 500; font-size: 1.1rem; }
+        .results {
+            background: #f8fafc; padding: 35px; border-radius: 20px;
+            margin-top: 25px; border: 1px solid #e5e7eb;
+        }
+        .error {
+            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); color: #991b1b;
+            padding: 18px; border-radius: 12px; margin: 15px 0; display: none;
+            border: 1px solid #f87171; font-weight: 500;
+        }
+        .ai-preferences {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            padding: 20px; border-radius: 15px; margin: 20px 0; border: 1px solid #10b981;
+        }
+        .ai-preferences h4 {
+            color: #065f46; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;
+        }
+        .ai-preferences .form-label { color: #065f46; }
+        .ai-preferences .form-input, .ai-preferences .form-select {
+            border-color: #10b981;
+        }
+        .ai-preferences .form-input:focus, .ai-preferences .form-select:focus {
+            border-color: #059669; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+        textarea.form-input {
+            resize: vertical; min-height: 80px;
+        }
+        @media (max-width: 768px) {
+            .form-grid { grid-template-columns: 1fr; gap: 25px; }
+            .container { padding: 25px; }
+            .navbar { flex-direction: column; gap: 15px; padding: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div class="logo">
+            <div class="logo-icon">✈️</div>
+            <span class="logo-text">TripCraft</span>
+        </div>
+        <div class="ai-badge">🤖 AI-Powered</div>
+    </div>
+
+    <div class="container">
+        <div class="hero-section">
+            <h1 class="hero-title">Craft Your Perfect Journey with AI</h1>
+            <p class="hero-subtitle">AI-powered travel planning with intelligent recommendations</p>
+            <div class="features-preview">
+                <div class="feature-pill ai-feature">🤖 AI Travel Expert</div>
+                <div class="feature-pill ai-feature">🧠 Smart Recommendations</div>
+                <div class="feature-pill">🌍 Global Coverage</div>
+                <div class="feature-pill">💰 Smart Budgeting</div>
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-section">
+                <h3 class="section-title">🎯 Trip Details</h3>
+                <form id="travelForm">
+                    <div class="form-group">
+                        <label class="form-label">Number of Days</label>
+                        <input type="number" id="days" name="days" class="form-input" min="1" max="30" value="3" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Number of People</label>
+                        <input type="number" id="people" name="people" class="form-input" min="1" max="20" value="2" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Budget (USD)</label>
+                        <input type="number" id="budget" name="budget" class="form-input" min="50" value="1000" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Country</label>
+                        <select id="country" name="country" class="form-select" required>
+                            <option value="">Loading countries...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">City</label>
+                        <select id="city" name="city" class="form-select" required disabled>
+                            <option value="">Select country first</option>
+                        </select>
+                    </div>
+
+                    <!-- AI Preferences Section -->
+                    <div class="ai-preferences">
+                        <h4>
+                            <span>🤖</span> AI Preferences (Optional)
+                        </h4>
+                        
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label class="form-label">Travel Style</label>
+                            <select id="travelStyle" name="travelStyle" class="form-select">
+                                <option value="">Let AI decide</option>
+                                <option value="adventure">Adventure & Outdoor Activities</option>
+                                <option value="cultural">Cultural & Historical Sites</option>
+                                <option value="relaxation">Relaxation & Wellness</option>
+                                <option value="foodie">Food & Local Cuisine</option>
+                                <option value="nightlife">Nightlife & Entertainment</option>
+                                <option value="family">Family-Friendly Activities</option>
+                                <option value="romantic">Romantic Getaway</option>
+                                <option value="business">Business Travel</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label class="form-label">Special Interests</label>
+                            <input type="text" id="interests" name="interests" class="form-input" 
+                                   placeholder="e.g., photography, museums, beaches, shopping, art galleries...">
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label class="form-label">Dietary Restrictions</label>
+                            <select id="dietary" name="dietary" class="form-select">
+                                <option value="">No restrictions</option>
+                                <option value="vegetarian">Vegetarian</option>
+                                <option value="vegan">Vegan</option>
+                                <option value="gluten-free">Gluten-Free</option>
+                                <option value="halal">Halal</option>
+                                <option value="kosher">Kosher</option>
+                                <option value="dairy-free">Dairy-Free</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 10px;">
+                            <label class="form-label">Additional AI Instructions</label>
+                            <textarea id="aiPrompt" name="aiPrompt" class="form-input" rows="3" 
+                                      placeholder="Tell our AI travel expert anything specific you want... e.g., 'Find hidden gems locals love', 'Avoid touristy places', 'Include Instagram-worthy spots', 'Focus on sustainable travel options'..."></textarea>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="submit-btn">🤖 Generate AI-Powered Itinerary</button>
+                   
+                </form>
+            </div>
+
+            <div class="form-section">
+                <h3>🗺️ Your AI-Crafted Itinerary</h3>
+                <div class="error" id="errorDiv"></div>
+                <div class="loading" id="loadingDiv">
+                    <div class="spinner"></div>
+                    <p>AI is crafting your perfect itinerary...</p>
+                </div>
+                <div class="results" id="resultsDiv">
+                    <div style="text-align: center; color: #666;">
+                        <h4>🤖 Ready for AI-powered planning?</h4>
+                        <p>Our AI travel expert will create a personalized itinerary!</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        console.log('🚀 TripCraft AI starting...');
+
+        function loadCountries() {
+            console.log('🌍 Loading countries...');
+            const countrySelect = document.getElementById('country');
+            if (!countrySelect) return;
+
+            countrySelect.innerHTML = '<option value="">Loading...</option>';
+
+            fetch('/api/countries')
+                .then(response => response.json())
+                .then(countries => {
+                    console.log('✅ Countries loaded:', countries.length);
+                    countrySelect.innerHTML = '<option value="">Select a country</option>';
+                    countries.forEach(country => {
+                        const option = document.createElement('option');
+                        option.value = country;
+                        option.textContent = country;
+                        countrySelect.appendChild(option);
+                    });
+                })
+                .catch(error => {
+                    console.error('❌ Countries error:', error);
+                    const fallback = ['United States', 'United Kingdom', 'Canada', 'Germany', 'France', 'Japan', 'Italy', 'Spain', 'Australia', 'Bahamas'];
+                    countrySelect.innerHTML = '<option value="">Select a country</option>';
+                    fallback.forEach(country => {
+                        const option = document.createElement('option');
+                        option.value = country;
+                        option.textContent = country;
+                        countrySelect.appendChild(option);
+                    });
+                });
+        }
+
+        function handleCountryChange() {
+            const countrySelect = document.getElementById('country');
+            const citySelect = document.getElementById('city');
+            const country = countrySelect.value;
+
+            if (!country) {
+                citySelect.innerHTML = '<option value="">Select country first</option>';
+                citySelect.disabled = true;
+                return;
+            }
+
+            citySelect.innerHTML = '<option value="">Loading cities...</option>';
+            citySelect.disabled = true;
+
+            fetch('/api/cities/' + encodeURIComponent(country))
+                .then(response => response.json())
+                .then(cities => {
+                    citySelect.innerHTML = '<option value="">Select a city</option>';
+                    cities.forEach(city => {
+                        const option = document.createElement('option');
+                        option.value = city;
+                        option.textContent = city;
+                        citySelect.appendChild(option);
+                    });
+                    citySelect.disabled = false;
+                })
+                .catch(error => {
+                    console.error('Cities error:', error);
+                    citySelect.innerHTML = '<option value="">Error loading cities</option>';
+                });
+        }
+
+        function handleFormSubmit(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            const data = {
+                days: parseInt(formData.get('days')),
+                people: parseInt(formData.get('people')),
+                budget: parseFloat(formData.get('budget')),
+                country: formData.get('country'),
+                city: formData.get('city'),
+                // AI Preferences
+                travelStyle: formData.get('travelStyle') || '',
+                interests: formData.get('interests') || '',
+                dietary: formData.get('dietary') || '',
+                aiPrompt: formData.get('aiPrompt') || ''
+            };
+
+            console.log('📊 Form data with AI preferences:', data);
+
+            if (!data.country || !data.city) {
+                showError('Please select country and city');
+                return;
+            }
+
+            showLoading();
+            hideError();
+
+            fetch('/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(result => {
+                        throw new Error(result.error || 'Generate failed');
+                    });
+                }
+                return response.json();
+            })
+            .then(result => {
+                hideLoading();
+                showResults(result);
+            })
+            .catch(error => {
+                hideLoading();
+                showError('Failed to generate itinerary: ' + error.message);
+            });
+        }
+
+        function showError(message) {
+            document.getElementById('errorDiv').textContent = message;
+            document.getElementById('errorDiv').style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('errorDiv').style.display = 'none';
+        }
+
+        function showLoading() {
+            document.getElementById('loadingDiv').style.display = 'block';
+            document.getElementById('resultsDiv').style.display = 'none';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingDiv').style.display = 'none';
+            document.getElementById('resultsDiv').style.display = 'block';
+        }
+
+        function showResults(data) {
+            const resultsDiv = document.getElementById('resultsDiv');
+            
+            let html = '<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 20px; margin-bottom: 30px; position: relative;">';
+            html += '<div style="position: absolute; top: 15px; right: 15px; background: linear-gradient(135deg, #ff6b6b 0%, #ffa726 100%); padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: 600;">🤖 AI-Powered</div>';
+            html += '<h2>🗺️ ' + data.destination + '</h2>';
+            html += '<p>' + data.total_days + ' days • ' + data.total_people + ' people • $' + data.budget + ' budget</p>';
+            
+            // Show AI preferences used
+            if (data.preferences_used) {
+                html += '<div style="background: rgba(255,255,255,0.15); padding: 10px; border-radius: 8px; margin-top: 15px; font-size: 14px;">';
+                html += '<strong>🤖 AI Customized for:</strong> ' + data.preferences_used;
+                html += '</div>';
+            }
+            
+            html += '</div>';
+
+            // AI Insights
+            if (data.ai_insights) {
+                html += '<div style="background: #fef3c7; padding: 20px; border-radius: 15px; margin: 20px 0; border: 1px solid #f59e0b;">';
+                html += '<h3 style="color: #92400e; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;"><span>🤖</span> AI Travel Expert Insights</h3>';
+                html += '<p style="color: #92400e;">' + data.ai_insights + '</p>';
+                html += '</div>';
+            }
+
+            // AI Tips
+            if (data.money_saving_tips && data.money_saving_tips.length > 0) {
+                html += '<div style="background: #ecfdf5; padding: 20px; border-radius: 15px; margin: 20px 0; border: 1px solid #10b981;">';
+                html += '<h3 style="color: #065f46; margin-bottom: 15px;">🤖 AI Money-Saving Tips</h3>';
+                data.money_saving_tips.forEach(tip => {
+                    html += '<div style="background: white; padding: 10px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #10b981;">' + tip + '</div>';
+                });
+                html += '</div>';
+            }
+
+            // Itinerary
+            if (data.itinerary && data.itinerary.length > 0) {
+                html += '<h3>📅 AI-Curated Itinerary</h3>';
+                data.itinerary.forEach(day => {
+                    html += '<div style="background: white; padding: 20px; margin: 15px 0; border-radius: 15px; border: 1px solid #e5e7eb; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">';
+                    html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">';
+                    html += '<h4 style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 10px 20px; border-radius: 15px;">Day ' + day.day + '</h4>';
+                    html += '<span style="font-weight: bold;">$' + day.estimated_cost + '</span>';
+                    html += '</div>';
+                    
+                    if (day.activities && day.activities.length > 0) {
+                        html += '<h5>🎯 Activities:</h5>';
+                        day.activities.forEach(activity => {
+                            html += '<div style="background: #f8fafc; padding: 15px; margin: 10px 0; border-radius: 10px;">';
+                            html += '<strong>🤖 ' + activity.name + '</strong>';
+                            if (activity.rating) html += ' ⭐ ' + activity.rating + '/5';
+                            if (activity.address) html += '<br><small>📍 ' + activity.address + '</small>';
+                            
+                            // Booking links
+                            html += '<div style="margin-top: 10px;">';
+                            const activityName = encodeURIComponent(activity.name);
+                            html += '<a href="https://www.viator.com/searchResults/all?text=' + activityName + '" target="_blank" style="display: inline-block; padding: 5px 10px; margin: 2px; background: #00a8cc; color: white; text-decoration: none; border-radius: 5px; font-size: 12px;">Viator</a>';
+                            html += '<a href="https://www.expedia.com/things-to-do/search?location=' + activityName + '" target="_blank" style="display: inline-block; padding: 5px 10px; margin: 2px; background: #ffc72c; color: black; text-decoration: none; border-radius: 5px; font-size: 12px;">Expedia</a>';
+                            html += '</div>';
+                            html += '</div>';
+                        });
+                    }
+                    
+                    if (day.restaurant) {
+                        html += '<div style="background: #fef3c7; padding: 15px; margin-top: 15px; border-radius: 10px; border: 1px solid #f59e0b;">';
+                        html += '<h5>🍽️ Restaurant: ' + day.restaurant.name + '</h5>';
+                        if (day.restaurant.rating) html += '⭐ ' + day.restaurant.rating + '/5';
+                        
+                        // Restaurant booking
+                        html += '<div style="margin-top: 10px;">';
+                        const restaurantName = encodeURIComponent(day.restaurant.name);
+                        html += '<a href="https://www.opentable.com/s?restaurantName=' + restaurantName + '" target="_blank" style="display: inline-block; padding: 5px 10px; margin: 2px; background: #da3743; color: white; text-decoration: none; border-radius: 5px; font-size: 12px;">OpenTable</a>';
+                        html += '</div>';
+                        html += '</div>';
+                    }
+                    
+                    html += '</div>';
+                });
+            }
+
+            // Hotels
+            if (data.hotels && data.hotels.length > 0) {
+                html += '<h3 style="margin-top: 30px;">🏨 AI-Recommended Hotels</h3>';
+                html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">';
+                data.hotels.slice(0, 4).forEach(hotel => {
+                    html += '<div style="background: white; padding: 15px; border-radius: 10px; border: 1px solid #e5e7eb;">';
+                    html += '<h5>🤖 ' + hotel.name + '</h5>';
+                    if (hotel.rating) html += '<p>⭐ ' + hotel.rating + '/5</p>';
+                    if (hotel.vicinity) html += '<p style="font-size: 12px; color: #666;">📍 ' + hotel.vicinity + '</p>';
+                    
+                    // Hotel booking links
+                    html += '<div style="margin-top: 10px;">';
+                    const hotelName = encodeURIComponent(hotel.name);
+                    html += '<a href="https://www.booking.com/search.html?ss=' + hotelName + '" target="_blank" style="display: inline-block; padding: 5px 8px; margin: 2px; background: #003580; color: white; text-decoration: none; border-radius: 5px; font-size: 11px;">Booking.com</a>';
+                    html += '<a href="https://www.expedia.com/Hotel-Search?destination=' + hotelName + '" target="_blank" style="display: inline-block; padding: 5px 8px; margin: 2px; background: #ffc72c; color: black; text-decoration: none; border-radius: 5px; font-size: 11px;">Expedia</a>';
+                    html += '</div>';
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+
+            resultsDiv.innerHTML = html;
+        }
+
+        // Setup
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('📱 DOM loaded');
+            loadCountries();
+            
+            const countrySelect = document.getElementById('country');
+            const form = document.getElementById('travelForm');
+            
+            if (countrySelect) {
+                countrySelect.addEventListener('change', handleCountryChange);
+            }
+            
+            if (form) {
+                form.addEventListener('submit', handleFormSubmit);
+            }
+            
+            console.log('✅ Setup complete');
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Test - TripCraft</title>
+</head>
+<body>
+    <h1>Debug Test</h1>
+    
+    <div>
+        <label for="country">Country:</label>
+        <select id="country">
+            <option value="">Loading countries...</option>
+        </select>
+    </div>
+    
+    <div id="debug-output">
+        <h3>Debug Information:</h3>
+        <div id="debug-log"></div>
+    </div>
+
+    <script>
+        function log(message) {
+            console.log(message);
+            const debugLog = document.getElementById('debug-log');
+            debugLog.innerHTML += '<p>' + new Date().toLocaleTimeString() + ': ' + message + '</p>';
+        }
+
+        log('🔄 Starting debug test...');
+        log('📍 Current URL: ' + window.location.href);
+
+        // Test 1: Check if we can reach the API
+        async function testAPI() {
+            log('📡 Testing API endpoint...');
+            
+            try {
+                const response = await fetch('/api/countries');
+                log('📊 Response status: ' + response.status);
+                log('📊 Response ok: ' + response.ok);
+                
+                if (!response.ok) {
+                    throw new Error('HTTP error! status: ' + response.status);
+                }
+                
+                const data = await response.json();
+                log('✅ API Response received');
+                log('📋 Number of countries: ' + data.length);
+                log('📋 First 3 countries: ' + JSON.stringify(data.slice(0, 3)));
+                
+                return data;
+            } catch (error) {
+                log('❌ API Error: ' + error.message);
+                return null;
+            }
+        }
+
+        // Test 2: Try to populate the dropdown
+        async function loadCountries() {
+            log('🔄 Loading countries into dropdown...');
+            
+            const countries = await testAPI();
+            
+            if (!countries) {
+                log('❌ No countries data received');
+                return;
+            }
+
+            const countrySelect = document.getElementById('country');
+            
+            if (!countrySelect) {
+                log('❌ Country select element not found!');
+                return;
+            }
+
+            log('📝 Clearing dropdown...');
+            countrySelect.innerHTML = '<option value="">Select a country</option>';
+            
+            log('📝 Adding countries to dropdown...');
+            let addedCount = 0;
+            
+            countries.forEach(function(country) {
+                const option = document.createElement('option');
+                option.value = country;
+                option.textContent = country;
+                countrySelect.appendChild(option);
+                addedCount++;
+            });
+            
+            log('✅ Added ' + addedCount + ' countries to dropdown');
+            log('📊 Final dropdown options count: ' + countrySelect.options.length);
+        }
+
+        // Test 3: Manual button test
+        function manualTest() {
+            log('🔄 Manual test button clicked');
+            loadCountries();
+        }
+
+        // Start the test when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            log('📄 DOM Content Loaded');
+            log('🚀 Starting automatic test in 1 second...');
+            
+            setTimeout(function() {
+                loadCountries();
+            }, 1000);
+        });
+
+        log('📜 Script loaded');
+    </script>
+    
+    <button onclick="manualTest()" style="margin-top: 20px; padding: 10px; background: #007bff; color: white; border: none; border-radius: 5px;">
+        🔄 Manual Test
+    </button>
+</body>
+</html>
