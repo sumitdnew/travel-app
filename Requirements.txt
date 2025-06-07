@@ -1,0 +1,9 @@
+Flask==2.3.3
+gunicorn==21.2.0
+Werkzeug==2.3.7
+requests==2.31.0
+urllib3==1.26.18
+certifi==2023.7.22
+requests==2.31.0
+PyJWT==2.8.0
+openai==0.28.1
