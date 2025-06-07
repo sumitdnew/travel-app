@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, session
+from flask_cors import CORS
 import requests
 import json
 import random
@@ -18,11 +19,14 @@ except ImportError:
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-here-change-in-production')
 
+# Enable CORS for API calls
+CORS(app)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# API Keys - ALL FROM ENVIRONMENT VARIABLES (NO HARDCODED KEYS)
+# API Keys - NOW PROPERLY SECURED
 GOOGLE_PLACES_API_KEY = os.environ.get('GOOGLE_PLACES_API_KEY')
 OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY') 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
@@ -48,6 +52,7 @@ except ImportError:
 # In-memory storage (replace with proper database in production)
 users_db = {}
 trips_db = {}
+rate_limit_store = {}
 
 # Subscription tiers and limits
 SUBSCRIPTION_LIMITS = {
@@ -73,6 +78,31 @@ class User:
         self.trips_this_month = 0
         self.total_trips = 0
 
+def rate_limit(max_requests=10, window_minutes=1):
+    """Simple rate limiting decorator"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            client_ip = request.remote_addr
+            current_time = datetime.now()
+            
+            if client_ip not in rate_limit_store:
+                rate_limit_store[client_ip] = []
+            
+            # Clean old requests
+            rate_limit_store[client_ip] = [
+                req_time for req_time in rate_limit_store[client_ip] 
+                if current_time - req_time < timedelta(minutes=window_minutes)
+            ]
+            
+            if len(rate_limit_store[client_ip]) >= max_requests:
+                return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
+            
+            rate_limit_store[client_ip].append(current_time)
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
 def get_fallback_tips():
     """Fallback tips when AI is unavailable"""
     return [
@@ -84,7 +114,7 @@ def get_fallback_tips():
         "🎫 Look for free walking tours and city passes"
     ]
 
-def generate_ai_enhanced_tips(days, people, budget, country, city, preferences=None):
+def generate_ai_enhanced_tips(days, people, budget, country, city):
     """Generate AI-enhanced travel recommendations using compatible OpenAI API"""
     if not OPENAI_API_KEY:
         return get_fallback_tips()
@@ -97,56 +127,43 @@ def generate_ai_enhanced_tips(days, people, budget, country, city, preferences=N
     else:
         budget_category = "luxury"
     
-    # Build personalized prompt based on preferences
-    base_prompt = f"""
+    prompt = f"""
     Give me 6 practical travel tips for visiting {city}, {country} on a {budget_category} budget for {days} days with {people} people.
-    """
-    
-    # Add preferences to prompt
-    if preferences:
-        if preferences.get('travelStyle'):
-            base_prompt += f"\nTravel style preference: {preferences['travelStyle']}"
-        if preferences.get('interests'):
-            base_prompt += f"\nSpecial interests: {preferences['interests']}"
-        if preferences.get('dietary'):
-            base_prompt += f"\nDietary restrictions: {preferences['dietary']}"
-        if preferences.get('aiPrompt'):
-            base_prompt += f"\nSpecial instructions: {preferences['aiPrompt']}"
-    
-    prompt = base_prompt + """
     
     Focus on:
-    - Money-saving strategies specific to this destination and preferences
-    - Local food recommendations (considering dietary restrictions if mentioned)
+    - Money-saving strategies specific to this destination
+    - Local food recommendations and where to find them
     - Transportation tips and cost-effective options
     - Cultural insights and etiquette
-    - Activities matching the specified interests and travel style
+    - Hidden gems and off-the-beaten-path experiences
     - Safety advice and common tourist traps to avoid
     
-    Format each tip as a short, actionable sentence starting with an emoji. Keep each tip under 80 characters.
+    Format each tip as a short, actionable sentence starting with an emoji. Keep each tip under 60 characters.
     """
     
     try:
         if USE_NEW_OPENAI and client:
+            # New OpenAI API
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a local travel expert with insider knowledge. Give practical, specific advice that saves money and enhances the travel experience based on the user's preferences."},
+                    {"role": "system", "content": "You are a local travel expert with insider knowledge. Give practical, specific advice that saves money and enhances the travel experience."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=500,
+                max_tokens=400,
                 temperature=0.7
             )
             ai_tips = response.choices[0].message.content
         elif not USE_NEW_OPENAI and OPENAI_API_KEY:
+            # Old OpenAI API
             import openai
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a local travel expert with insider knowledge. Give practical, specific advice that saves money and enhances the travel experience based on the user's preferences."},
+                    {"role": "system", "content": "You are a local travel expert with insider knowledge. Give practical, specific advice that saves money and enhances the travel experience."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=500,
+                max_tokens=400,
                 temperature=0.7
             )
             ai_tips = response.choices[0].message.content
@@ -155,6 +172,7 @@ def generate_ai_enhanced_tips(days, people, budget, country, city, preferences=N
         
         tips_list = [tip.strip() for tip in ai_tips.split('\n') if tip.strip() and len(tip.strip()) > 10]
         
+        # Ensure we have exactly 6 tips
         while len(tips_list) < 6:
             tips_list.extend(get_fallback_tips())
         
@@ -164,49 +182,43 @@ def generate_ai_enhanced_tips(days, people, budget, country, city, preferences=N
         logger.error(f"OpenAI API error: {e}")
         return get_fallback_tips()
 
-def get_ai_destination_insights(city, country, preferences=None):
+def get_ai_destination_insights(city, country):
     """Get AI-powered destination insights with fallback"""
     if not OPENAI_API_KEY:
         return f"Discover the unique charm of {city}, a destination filled with rich culture, amazing food, and unforgettable experiences."
     
-    base_prompt = f"""
+    prompt = f"""
     Provide a brief, engaging overview of {city}, {country} for travelers. Include:
     - What makes this destination special and unique
     - Best time to visit and why
     - One must-try local experience that tourists often miss
+    
+    Keep it under 100 words, inspiring, and informative.
     """
-    
-    if preferences:
-        if preferences.get('travelStyle'):
-            base_prompt += f"\n- Focus on {preferences['travelStyle']} aspects"
-        if preferences.get('interests'):
-            base_prompt += f"\n- Highlight opportunities for: {preferences['interests']}"
-        if preferences.get('aiPrompt'):
-            base_prompt += f"\n- Special consideration: {preferences['aiPrompt']}"
-    
-    prompt = base_prompt + "\n\nKeep it under 120 words, inspiring, and informative."
     
     try:
         if USE_NEW_OPENAI and client:
+            # New OpenAI API
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a travel writer creating inspiring yet informative destination descriptions. Focus on what makes each place unique and tailor to user preferences."},
+                    {"role": "system", "content": "You are a travel writer creating inspiring yet informative destination descriptions. Focus on what makes each place unique."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=200,
+                max_tokens=150,
                 temperature=0.8
             )
             return response.choices[0].message.content.strip()
         elif not USE_NEW_OPENAI and OPENAI_API_KEY:
+            # Old OpenAI API
             import openai
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a travel writer creating inspiring yet informative destination descriptions. Focus on what makes each place unique and tailor to user preferences."},
+                    {"role": "system", "content": "You are a travel writer creating inspiring yet informative destination descriptions. Focus on what makes each place unique."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=200,
+                max_tokens=150,
                 temperature=0.8
             )
             return response.choices[0].message.content.strip()
@@ -215,7 +227,7 @@ def get_ai_destination_insights(city, country, preferences=None):
         
     except Exception as e:
         logger.error(f"OpenAI API error: {e}")
-        return f"Discover the unique charm of {city}, a destination filled with rich culture, amazing food, and unforgettable experiences."
+        return f"Discover the unique charm of {city}, a destination filled with rich culture, amazing food, and unforgettable experiences. From historic landmarks to vibrant local markets, this city offers something special for every traveler."
 
 def get_hardcoded_coordinates(city):
     """Hardcoded coordinates for popular cities"""
@@ -258,7 +270,16 @@ def get_location_coordinates(city, country):
         return get_hardcoded_coordinates(city)
     
     city_clean = city.strip().title()
-    queries = [city, city_clean, f"{city},{country}", f"{city_clean},{country}"]
+    
+    # Try different query formats
+    queries = [
+        city,
+        city_clean,
+        f"{city},{country}",
+        f"{city_clean},{country}",
+        f"{city}, {country}",
+        f"{city_clean}, {country}",
+    ]
     
     for query in queries:
         try:
@@ -268,7 +289,23 @@ def get_location_coordinates(city, country):
             
             if response.status_code == 200:
                 data = response.json()
+                logger.info(f"OpenWeatherMap returned {len(data)} results for '{query}'")
+                
                 if data:
+                    for location in data:
+                        if (city.lower() in location['name'].lower() or 
+                            location['name'].lower() in city.lower()):
+                            result = {
+                                'lat': location['lat'],
+                                'lon': location['lon'],
+                                'name': location['name'],
+                                'country': location.get('country', country),
+                                'state': location.get('state', '')
+                            }
+                            logger.info(f"✅ Found matching location: {result}")
+                            return result
+                    
+                    # Use first result if no exact match
                     location = data[0]
                     result = {
                         'lat': location['lat'],
@@ -277,13 +314,14 @@ def get_location_coordinates(city, country):
                         'country': location.get('country', country),
                         'state': location.get('state', '')
                     }
-                    logger.info(f"✅ Found location: {result}")
+                    logger.info(f"✅ Using first result: {result}")
                     return result
                     
         except Exception as e:
-            logger.error(f"❌ OpenWeatherMap error: {e}")
+            logger.error(f"❌ OpenWeatherMap error for query '{query}': {e}")
             continue
     
+    # Fallback to hardcoded coordinates
     return get_hardcoded_coordinates(city)
 
 def get_weather_info(lat, lon):
@@ -371,16 +409,21 @@ def estimate_daily_budget(country, budget_level):
     multiplier = country_multipliers.get(country, 1.0)
     return base_costs[budget_level] * multiplier
 
-def generate_real_itinerary(days, people, total_budget, country, city, start_date=None, preferences=None):
+def generate_real_itinerary(days, people, total_budget, country, city, start_date=None):
     """Generate a comprehensive AI-enhanced travel itinerary"""
     
+    # Get location coordinates
     location_info = get_location_coordinates(city, country)
     if not location_info:
         return {"error": f"Could not find location information for {city}, {country}. Please try a different city or check spelling."}
     
+    # Get weather information
     weather_info = get_weather_info(location_info['lat'], location_info['lon'])
+    
+    # Calculate budget
     daily_budget = total_budget / days
     
+    # Determine budget category
     if daily_budget < 75:
         budget_category = "budget"
     elif daily_budget < 150:
@@ -390,18 +433,38 @@ def generate_real_itinerary(days, people, total_budget, country, city, start_dat
     
     logger.info(f"Searching for places near {city}...")
     
-    attractions = search_places_nearby(location_info['lat'], location_info['lon'], 'tourist_attraction')
-    restaurants = search_places_nearby(location_info['lat'], location_info['lon'], 'restaurant')
-    museums = search_places_nearby(location_info['lat'], location_info['lon'], 'museum')
-    hotels = search_hotels_nearby(location_info['lat'], location_info['lon'])
+    # Get comprehensive places data
+    attractions = search_places_nearby(
+        location_info['lat'], location_info['lon'], 
+        'tourist_attraction'
+    )
+    logger.info(f"Found {len(attractions)} attractions")
     
-    logger.info(f"Found {len(attractions)} attractions, {len(restaurants)} restaurants, {len(hotels)} hotels")
+    restaurants = search_places_nearby(
+        location_info['lat'], location_info['lon'], 
+        'restaurant'
+    )
+    logger.info(f"Found {len(restaurants)} restaurants")
     
+    museums = search_places_nearby(
+        location_info['lat'], location_info['lon'], 
+        'museum'
+    )
+    logger.info(f"Found {len(museums)} museums")
+    
+    # Get hotels
+    hotels = search_hotels_nearby(
+        location_info['lat'], location_info['lon']
+    )
+    logger.info(f"Found {len(hotels)} hotels")
+    
+    # Generate check-in/check-out dates
     check_in_date = start_date or (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
     check_out_date = (datetime.strptime(check_in_date, "%Y-%m-%d") + timedelta(days=days)).strftime("%Y-%m-%d")
     
-    ai_tips = generate_ai_enhanced_tips(days, people, total_budget, country, city, preferences)
-    ai_insights = get_ai_destination_insights(city, country, preferences)
+    # Get AI-enhanced content
+    ai_tips = generate_ai_enhanced_tips(days, people, total_budget, country, city)
+    ai_insights = get_ai_destination_insights(city, country)
     
     # Create sample activities if no real data available
     if not attractions and not restaurants:
@@ -419,16 +482,21 @@ def generate_real_itinerary(days, people, total_budget, country, city, start_dat
         attractions = sample_activities
         restaurants = sample_restaurants
     
+    # Combine all activities
     all_activities = attractions + museums
+    
+    # Sort by rating to get best places first
     all_activities.sort(key=lambda x: x.get('rating', 0), reverse=True)
     restaurants.sort(key=lambda x: x.get('rating', 0), reverse=True)
     hotels.sort(key=lambda x: x.get('rating', 0), reverse=True)
     
+    # Generate daily itinerary with detailed information
     itinerary = []
     used_activities = set()
     used_restaurants = set()
     
     for day in range(1, days + 1):
+        # Select 2-3 activities for the day
         available_activities = [a for a in all_activities if a['name'] not in used_activities]
         day_activities = []
         
@@ -442,28 +510,41 @@ def generate_real_itinerary(days, people, total_budget, country, city, start_dat
                     'reviews_count': activity.get('user_ratings_total', 0),
                     'address': activity.get('vicinity', ''),
                     'types': activity.get('types', []),
+                    'phone': activity.get('phone', ''),
+                    'website': activity.get('website', ''),
+                    'google_maps_url': activity.get('google_maps_url', ''),
+                    'google_url': activity.get('google_url', ''),
+                    'opening_hours': activity.get('opening_hours_text', []),
                     'booking_links': get_booking_links(activity['name'], city)
                 }
                 day_activities.append(activity_info)
                 used_activities.add(activity['name'])
         
+        # Select restaurant for the day
         available_restaurants = [r for r in restaurants if r['name'] not in used_restaurants]
         restaurant_info = None
         
         if available_restaurants:
-            selected_restaurant = available_restaurants[0]
+            selected_restaurant = available_restaurants[0]  # Best rated available
             restaurant_info = {
                 'name': selected_restaurant['name'],
                 'rating': selected_restaurant.get('rating', 0),
                 'reviews_count': selected_restaurant.get('user_ratings_total', 0),
                 'price_level': selected_restaurant.get('price_level', 2),
-                'address': selected_restaurant.get('vicinity', '')
+                'address': selected_restaurant.get('vicinity', ''),
+                'phone': selected_restaurant.get('phone', ''),
+                'website': selected_restaurant.get('website', ''),
+                'google_maps_url': selected_restaurant.get('google_maps_url', ''),
+                'google_url': selected_restaurant.get('google_url', ''),
+                'opening_hours': selected_restaurant.get('opening_hours_text', []),
+                'cuisine_types': [t.replace('_', ' ').title() for t in selected_restaurant.get('types', []) if 'food' in t or 'restaurant' in t or 'meal' in t]
             }
             used_restaurants.add(selected_restaurant['name'])
         
+        # Estimate daily cost
         estimated_cost = estimate_daily_budget(location_info['country'], budget_category)
         if people > 2:
-            estimated_cost *= (people * 0.85)
+            estimated_cost *= (people * 0.85)  # Group discount
         
         day_plan = {
             "day": day,
@@ -476,26 +557,12 @@ def generate_real_itinerary(days, people, total_budget, country, city, start_dat
     
     total_estimated_cost = sum(day["estimated_cost"] for day in itinerary)
     
-    preferences_summary = ""
-    if preferences and any(preferences.values()):
-        prefs = []
-        if preferences.get('travelStyle'):
-            prefs.append(f"Style: {preferences['travelStyle']}")
-        if preferences.get('interests'):
-            prefs.append(f"Interests: {preferences['interests']}")
-        if preferences.get('dietary'):
-            prefs.append(f"Dietary: {preferences['dietary']}")
-        if preferences.get('aiPrompt'):
-            prefs.append(f"Special: {preferences['aiPrompt'][:50]}...")
-        preferences_summary = " | ".join(prefs)
-    
     return {
         "destination": f"{location_info['name']}, {location_info['country']}",
         "location_info": location_info,
         "weather_info": weather_info,
         "ai_powered": True,
         "ai_insights": ai_insights,
-        "preferences_used": preferences_summary,
         "total_days": days,
         "total_people": people,
         "budget": total_budget,
@@ -508,7 +575,7 @@ def generate_real_itinerary(days, people, total_budget, country, city, start_dat
         "attractions_found": len(attractions),
         "restaurants_found": len(restaurants),
         "museums_found": len(museums),
-        "hotels": hotels[:10] if hotels else [],
+        "hotels": hotels[:10] if hotels else [],  # Top 10 hotels
         "check_in_date": check_in_date,
         "check_out_date": check_out_date
     }
@@ -519,19 +586,22 @@ def index():
 
 @app.route('/api/countries')
 def get_countries():
-    """Get list of countries - SIMPLIFIED VERSION"""
+    """Get list of countries with caching - SIMPLIFIED VERSION"""
     logger.info("Countries API endpoint called")
     
+    # Use reliable fallback countries first
     fallback_countries = [
         "United States", "United Kingdom", "Canada", "Australia", "Germany",
         "France", "Japan", "Italy", "Spain", "Mexico", "Brazil", "India",
         "Thailand", "Netherlands", "Sweden", "Norway", "Denmark", "Switzerland",
         "Austria", "Belgium", "Portugal", "Greece", "Poland", "Czech Republic",
         "Hungary", "Ireland", "Finland", "New Zealand", "South Korea", "Singapore",
-        "Bahamas", "Jamaica", "Costa Rica", "Chile", "Argentina", "Colombia"
+        "Bahamas", "Jamaica", "Costa Rica", "Chile", "Argentina", "Colombia",
+        "Peru", "Ecuador", "Panama", "Croatia", "Slovenia", "Estonia", "Latvia"
     ]
     
     try:
+        # Try to get from REST Countries API with shorter timeout
         response = requests.get('https://restcountries.com/v3.1/all?fields=name', timeout=3)
         if response.status_code == 200:
             data = response.json()
@@ -539,210 +609,153 @@ def get_countries():
             for country in data:
                 if 'name' in country and 'common' in country['name']:
                     name = country['name']['common']
-                    if len(name) < 50:
+                    if len(name) < 50:  # Filter out very long names
                         countries.append(name)
             
-            if len(countries) > 50:
+            if len(countries) > 50:  # Only use API result if we got a good response
                 logger.info(f"Loaded {len(countries)} countries from REST Countries API")
                 return jsonify(sorted(countries))
     except Exception as e:
         logger.warning(f"REST Countries API failed: {e}")
     
+    # Always return fallback countries if API fails
     logger.info(f"Using fallback countries: {len(fallback_countries)} countries")
     return jsonify(sorted(fallback_countries))
 
 @app.route('/api/cities/<country>')
 def get_cities_for_country(country):
-    """Get cities for a country - SIMPLIFIED AND BULLETPROOF"""
+    """Get cities for a country with improved handling"""
     logger.info(f"Getting cities for country: {country}")
     
+    # Enhanced popular cities database
     popular_cities = {
         "United States": [
             "New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia",
             "San Antonio", "San Diego", "Dallas", "San Jose", "Austin", "Jacksonville",
             "San Francisco", "Columbus", "Charlotte", "Fort Worth", "Indianapolis",
             "Seattle", "Denver", "Boston", "Detroit", "Nashville", "Memphis", "Portland",
-            "Las Vegas", "Miami", "Atlanta", "New Orleans", "Tampa", "Orlando", "Honolulu"
+            "Las Vegas", "Miami", "Atlanta", "New Orleans", "Tampa", "Orlando"
         ],
         "United Kingdom": [
             "London", "Birmingham", "Manchester", "Glasgow", "Liverpool", "Leeds",
             "Sheffield", "Edinburgh", "Bristol", "Cardiff", "Belfast", "Leicester",
-            "Brighton", "Newcastle", "Nottingham", "Cambridge", "Oxford", "Bath", "York"
+            "Brighton", "Newcastle", "Nottingham", "Cambridge", "Oxford", "Bath"
         ],
         "Bahamas": [
             "Nassau", "Freeport", "Nicholls Town", "Alice Town", "Clarence Town", 
             "Cockburn Town", "Cooper's Town", "Dunmore Town", "Governor's Harbour",
-            "High Rock", "Marsh Harbour", "Matthew Town", "Rock Sound", "George Town"
+            "High Rock", "Marsh Harbour", "Matthew Town", "Rock Sound"
         ],
         "Canada": [
             "Toronto", "Montreal", "Vancouver", "Calgary", "Edmonton", "Ottawa", 
-            "Winnipeg", "Quebec City", "Hamilton", "Victoria", "Halifax", "Saskatoon",
-            "Regina", "St. John's", "Fredericton", "Charlottetown"
+            "Winnipeg", "Quebec City", "Hamilton", "Victoria", "Halifax", "Saskatoon"
         ],
         "Germany": [
             "Berlin", "Hamburg", "Munich", "Cologne", "Frankfurt", "Stuttgart",
-            "Düsseldorf", "Leipzig", "Dortmund", "Essen", "Bremen", "Dresden",
-            "Hanover", "Nuremberg", "Duisburg", "Bochum"
+            "Düsseldorf", "Leipzig", "Dortmund", "Essen", "Bremen", "Dresden"
         ],
         "France": [
             "Paris", "Marseille", "Lyon", "Toulouse", "Nice", "Nantes", "Montpellier",
-            "Strasbourg", "Bordeaux", "Lille", "Rennes", "Reims", "Toulon", "Grenoble",
-            "Dijon", "Angers", "Villeurbanne", "Le Mans"
+            "Strasbourg", "Bordeaux", "Lille", "Rennes", "Reims", "Toulon", "Grenoble"
         ],
         "Japan": [
             "Tokyo", "Osaka", "Kyoto", "Yokohama", "Nagoya", "Sapporo", "Fukuoka",
-            "Kobe", "Hiroshima", "Sendai", "Kawasaki", "Chiba", "Nara", "Kanazawa",
-            "Shizuoka", "Kumamoto", "Okayama", "Hamamatsu"
+            "Kobe", "Hiroshima", "Sendai", "Kawasaki", "Chiba", "Nara", "Kanazawa"
         ],
         "Italy": [
             "Rome", "Milan", "Naples", "Turin", "Palermo", "Genoa", "Bologna",
-            "Florence", "Venice", "Verona", "Catania", "Bari", "Messina", "Padua",
-            "Trieste", "Brescia", "Parma", "Prato"
+            "Florence", "Venice", "Verona", "Catania", "Bari", "Messina", "Padua"
         ],
         "Spain": [
             "Madrid", "Barcelona", "Valencia", "Seville", "Zaragoza", "Málaga",
-            "Murcia", "Palma", "Bilbao", "Alicante", "Granada", "Córdoba", "Vigo",
-            "Gijón", "L'Hospitalet", "Vitoria-Gasteiz", "A Coruña", "Elche"
+            "Murcia", "Palma", "Bilbao", "Alicante", "Granada", "Córdoba", "Vigo"
         ],
         "Australia": [
             "Sydney", "Melbourne", "Brisbane", "Perth", "Adelaide", "Gold Coast",
-            "Newcastle", "Canberra", "Sunshine Coast", "Wollongong", "Hobart", "Geelong",
-            "Townsville", "Cairns", "Darwin", "Toowoomba"
+            "Newcastle", "Canberra", "Sunshine Coast", "Wollongong", "Hobart", "Geelong"
         ],
         "Mexico": [
             "Mexico City", "Guadalajara", "Monterrey", "Puebla", "Tijuana", "León",
-            "Juárez", "Torreón", "Querétaro", "San Luis Potosí", "Mérida", "Mexicali",
-            "Aguascalientes", "Acapulco", "Cuernavaca", "Saltillo"
+            "Juárez", "Torreón", "Querétaro", "San Luis Potosí", "Mérida", "Mexicali"
         ],
         "Brazil": [
             "São Paulo", "Rio de Janeiro", "Brasília", "Salvador", "Fortaleza", "Belo Horizonte",
-            "Manaus", "Curitiba", "Recife", "Goiânia", "Belém", "Porto Alegre",
-            "Guarulhos", "Campinas", "São Luís", "São Gonçalo"
-        ],
-        "Argentina": [
-            "Buenos Aires", "Córdoba", "Rosario", "Mendoza", "La Plata", "Tucumán",
-            "Mar del Plata", "Salta", "Santa Fe", "San Juan", "Resistencia", "Santiago del Estero",
-            "Corrientes", "Posadas", "Neuquén", "Bahía Blanca"
-        ],
-        "Chile": [
-            "Santiago", "Valparaíso", "Concepción", "La Serena", "Antofagasta", "Temuco",
-            "Rancagua", "Talca", "Arica", "Chillán", "Iquique", "Los Ángeles"
-        ],
-        "Colombia": [
-            "Bogotá", "Medellín", "Cali", "Barranquilla", "Cartagena", "Cúcuta",
-            "Soledad", "Ibagué", "Bucaramanga", "Soacha", "Santa Marta", "Villavicencio"
-        ],
-        "Peru": [
-            "Lima", "Arequipa", "Trujillo", "Chiclayo", "Piura", "Iquitos",
-            "Cusco", "Chimbote", "Huancayo", "Tacna", "Juliaca", "Ica"
-        ],
-        "Netherlands": [
-            "Amsterdam", "Rotterdam", "The Hague", "Utrecht", "Eindhoven", "Tilburg",
-            "Groningen", "Almere", "Breda", "Nijmegen", "Enschede", "Haarlem"
-        ],
-        "Switzerland": [
-            "Zurich", "Geneva", "Basel", "Lausanne", "Bern", "Winterthur",
-            "Lucerne", "St. Gallen", "Lugano", "Biel", "Thun", "Köniz"
-        ],
-        "Sweden": [
-            "Stockholm", "Gothenburg", "Malmö", "Uppsala", "Västerås", "Örebro",
-            "Linköping", "Helsingborg", "Jönköping", "Norrköping", "Lund", "Umeå"
-        ],
-        "Norway": [
-            "Oslo", "Bergen", "Stavanger", "Trondheim", "Drammen", "Fredrikstad",
-            "Kristiansand", "Sandnes", "Tromsø", "Sarpsborg", "Skien", "Ålesund"
-        ],
-        "Denmark": [
-            "Copenhagen", "Aarhus", "Odense", "Aalborg", "Esbjerg", "Randers",
-            "Kolding", "Horsens", "Vejle", "Roskilde", "Herning", "Silkeborg"
-        ],
-        "Belgium": [
-            "Brussels", "Antwerp", "Ghent", "Charleroi", "Liège", "Bruges",
-            "Namur", "Leuven", "Mons", "Aalst", "Mechelen", "La Louvière"
-        ],
-        "Austria": [
-            "Vienna", "Graz", "Linz", "Salzburg", "Innsbruck", "Klagenfurt",
-            "Villach", "Wels", "Sankt Pölten", "Dornbirn", "Steyr", "Wiener Neustadt"
-        ],
-        "Portugal": [
-            "Lisbon", "Porto", "Vila Nova de Gaia", "Amadora", "Braga", "Funchal",
-            "Coimbra", "Setúbal", "Almada", "Agualva-Cacém", "Queluz", "Rio Tinto"
-        ],
-        "Greece": [
-            "Athens", "Thessaloniki", "Patras", "Piraeus", "Larissa", "Heraklion",
-            "Peristeri", "Kallithea", "Acharnes", "Kalamaria", "Nikaia", "Glyfada"
-        ],
-        "Poland": [
-            "Warsaw", "Kraków", "Łódź", "Wrocław", "Poznań", "Gdańsk",
-            "Szczecin", "Bydgoszcz", "Lublin", "Katowice", "Białystok", "Gdynia"
-        ],
-        "Czech Republic": [
-            "Prague", "Brno", "Ostrava", "Plzen", "Liberec", "Olomouc",
-            "Budweis", "Hradec Králové", "Ústí nad Labem", "Pardubice", "Zlín", "Havířov"
-        ],
-        "Hungary": [
-            "Budapest", "Debrecen", "Szeged", "Miskolc", "Pécs", "Győr",
-            "Nyíregyháza", "Kecskemét", "Székesfehérvár", "Szombathely", "Tatabánya", "Kaposvár"
-        ],
-        "Ireland": [
-            "Dublin", "Cork", "Limerick", "Galway", "Waterford", "Drogheda",
-            "Dundalk", "Swords", "Bray", "Navan", "Ennis", "Kilkenny"
-        ],
-        "Finland": [
-            "Helsinki", "Espoo", "Tampere", "Vantaa", "Oulu", "Turku",
-            "Jyväskylä", "Lahti", "Kuopio", "Pori", "Kouvola", "Joensuu"
-        ],
-        "New Zealand": [
-            "Auckland", "Wellington", "Christchurch", "Hamilton", "Tauranga", "Napier-Hastings",
-            "Dunedin", "Palmerston North", "Nelson", "Rotorua", "New Plymouth", "Whangarei"
-        ],
-        "South Korea": [
-            "Seoul", "Busan", "Incheon", "Daegu", "Daejeon", "Gwangju",
-            "Suwon", "Ulsan", "Changwon", "Goyang", "Yongin", "Seongnam"
-        ],
-        "Singapore": [
-            "Singapore", "Jurong West", "Woodlands", "Tampines", "Sengkang", "Hougang",
-            "Yishun", "Bedok", "Ang Mo Kio", "Toa Payoh", "Choa Chu Kang", "Pasir Ris"
-        ],
-        "Jamaica": [
-            "Kingston", "Spanish Town", "Portmore", "Montego Bay", "May Pen", "Mandeville",
-            "Old Harbour", "Savanna-la-Mar", "Linstead", "Half Way Tree", "Port Antonio", "Ocho Rios"
-        ],
-        "Costa Rica": [
-            "San José", "Cartago", "Puntarenas", "Limón", "Alajuela", "Heredia",
-            "Desamparados", "Escazú", "Santa Ana", "Curridabat", "San Isidro", "Pococí"
-        ],
-        "India": [
-            "Mumbai", "Delhi", "Bangalore", "Hyderabad", "Ahmedabad", "Chennai",
-            "Kolkata", "Surat", "Pune", "Jaipur", "Lucknow", "Kanpur", "Nagpur", "Indore"
-        ],
-        "Thailand": [
-            "Bangkok", "Nonthaburi", "Pak Kret", "Hat Yai", "Chiang Mai", "Phuket",
-            "Pattaya", "Udon Thani", "Surat Thani", "Khon Kaen", "Nakhon Ratchasima", "Chiang Rai"
+            "Manaus", "Curitiba", "Recife", "Goiânia", "Belém", "Porto Alegre"
         ]
     }
     
-    # Always return cities if we have them
+    # Return hardcoded cities if available
     if country in popular_cities:
-        cities = popular_cities[country]
-        logger.info(f"✅ Found {len(cities)} cities for {country}")
-        return jsonify(cities)
+        logger.info(f"Found {len(popular_cities[country])} cities for {country}")
+        return jsonify(popular_cities[country])
     
-    # Fallback for any country not in our database
-    logger.info(f"⚠️ Using fallback cities for {country}")
-    fallback_cities = [
-        f"{country} Capital",
-        f"{country} City Center", 
-        f"{country} Downtown",
-        f"{country} Main City",
-        f"{country} Metropolitan Area"
-    ]
+    # Try Google Places API for other countries
+    if GOOGLE_PLACES_API_KEY:
+        try:
+            places_url = f"https://maps.googleapis.com/maps/api/place/textsearch/json"
+            params = {
+                'query': f"major cities in {country}",
+                'type': 'locality',
+                'key': GOOGLE_PLACES_API_KEY
+            }
+            
+            response = requests.get(places_url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                cities = []
+                
+                for place in data.get('results', [])[:20]:
+                    city_name = place.get('name', '')
+                    if city_name and any(t in place.get('types', []) for t in ['locality', 'administrative_area_level_1']):
+                        cities.append(city_name)
+                
+                unique_cities = list(set(cities))
+                if len(unique_cities) > 0:
+                    logger.info(f"Found {len(unique_cities)} cities for {country} via Google Places")
+                    return jsonify(sorted(unique_cities))
+        
+        except Exception as e:
+            logger.error(f"Error fetching cities for {country}: {e}")
     
+    # Final fallback: return some generic cities
+    fallback_cities = ["Capital City", "Main City", "Downtown", "City Center", "Metropolitan Area"]
+    logger.warning(f"Using fallback cities for {country}")
     return jsonify(fallback_cities)
+    
+    # Try Google Places API for other countries
+    if GOOGLE_PLACES_API_KEY:
+        try:
+            places_url = f"https://maps.googleapis.com/maps/api/place/textsearch/json"
+            params = {
+                'query': f"major cities in {country}",
+                'type': 'locality',
+                'key': GOOGLE_PLACES_API_KEY
+            }
+            
+            response = requests.get(places_url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                cities = []
+                
+                for place in data.get('results', [])[:20]:
+                    city_name = place.get('name', '')
+                    if city_name and any(t in place.get('types', []) for t in ['locality', 'administrative_area_level_1']):
+                        cities.append(city_name)
+                
+                unique_cities = list(set(cities))
+                return jsonify(sorted(unique_cities))
+        
+        except Exception as e:
+            logger.error(f"Error fetching cities for {country}: {e}")
+    
+    return jsonify([])
 
 @app.route('/generate', methods=['POST'])
+@rate_limit(max_requests=5, window_minutes=1)
 def generate():
-    """Generate travel itinerary with AI preferences"""
+    """Generate travel itinerary with enhanced security and validation"""
     try:
         data = request.get_json()
         
@@ -753,15 +766,6 @@ def generate():
             budget = float(data.get('budget', 100))
             country = data.get('country', '').strip()
             city = data.get('city', '').strip()
-            
-            # AI Preferences
-            preferences = {
-                'travelStyle': data.get('travelStyle', '').strip(),
-                'interests': data.get('interests', '').strip(),
-                'dietary': data.get('dietary', '').strip(),
-                'aiPrompt': data.get('aiPrompt', '').strip()
-            }
-            
         except (ValueError, TypeError) as e:
             return jsonify({"error": "Invalid input format. Please check your values."}), 400
         
@@ -794,12 +798,10 @@ def generate():
                     "message": "Create a free account to plan longer trips, or upgrade to Premium for unlimited planning"
                 }), 401
         
-        logger.info(f"Generating AI-customized itinerary for {city}, {country} - {days} days, {people} people, ${budget}")
-        if any(preferences.values()):
-            logger.info(f"AI Preferences: {preferences}")
+        logger.info(f"Generating itinerary for {city}, {country} - {days} days, {people} people, ${budget}")
         
-        # Generate the itinerary with AI preferences
-        itinerary = generate_real_itinerary(days, people, budget, country, city, preferences=preferences)
+        # Generate the itinerary using existing logic
+        itinerary = generate_real_itinerary(days, people, budget, country, city)
         
         if "error" in itinerary:
             return jsonify(itinerary), 400
@@ -816,7 +818,6 @@ def generate():
                 'destination': f"{city}, {country}",
                 'days': days,
                 'budget': budget,
-                'preferences': preferences,
                 'created_at': datetime.now(),
                 'itinerary_data': itinerary
             }
@@ -847,12 +848,12 @@ def health():
     })
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
     logger.info("Starting Enhanced TripCraft app...")
     logger.info("Security improvements:")
     logger.info("  ✅ Environment variables for API keys")
+    logger.info("  ✅ Rate limiting")
     logger.info("  ✅ Input validation")
-    logger.info("  ✅ AI preferences support")
+    logger.info("  ✅ Modern OpenAI API compatibility")
     logger.info("  ✅ Enhanced error handling")
     logger.info("  ✅ Proper logging")
     logger.info("API endpoints:")
@@ -860,4 +861,4 @@ if __name__ == '__main__':
     logger.info("  Cities: http://localhost:5000/api/cities/<country>")
     logger.info("  Generate: http://localhost:5000/generate")
     logger.info("  Main app: http://localhost:5000/")
-    app.run(debug=False, host='0.0.0.0', port=port)
+    app.run(debug=False, host='0.0.0.0', port=5000)
